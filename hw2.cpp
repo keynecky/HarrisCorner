@@ -1,175 +1,185 @@
 #include <opencv2/opencv.hpp>
+#include <Eigen/Dense>
+#include <Eigen/Eigenvalues>
 #include <iostream>
 
 using namespace cv;
 using namespace std;
+using namespace Eigen;
 
 const double ALPHA = 0.04;
-const double THRESHOLD = 10000000000;
+const double THRESHOLD = 100000000;  //è®¾å®šRå€¼çš„è¿‡æ»¤é˜ˆå€¼
 
 
 void HarrisCorner(Mat img);
-Mat FilterR(Mat& R, Mat& img, int wsize);
+Mat FilterR(Mat& R, Mat& img, int wsize);  //å¯¹Rå€¼è¿›è¡Œå±€éƒ¨æå¤§å€¼æŠ‘åˆ¶
 int VideoPlay();
-Mat computeImage(Mat& ix, Mat& iy, int wsize, int para);
+void computeImage(Mat& ix, Mat& iy, int wsize, Mat& i_xx, Mat& i_yy, Mat& i_xy, Mat& i_max, Mat& i_min, Mat& r);
+void GetLambda(double ixx, double iyy, double ixy, double& maxVal, double& minVal);  //è®¡ç®—ç‰¹å¾å€¼
+
 
 
 int main()
 {
-    VideoPlay();
-    return 0;
+	VideoPlay();
+	return 0;
 }
 
 
 void HarrisCorner(Mat img)
 {
-    Mat img_gray, result, filter_R;
-    cvtColor(img, img_gray, COLOR_BGR2GRAY);  //½«²ÊÉ«Í¼Ïñ×ª»¯³É»Ò¶ÈÍ¼Ïñ
-    //imshow("gray", img_gray);
-    Mat img_x = Mat::zeros(img_gray.size(), CV_64FC1);
-    Mat img_y = Mat::zeros(img_gray.size(), CV_64FC1);
-    Mat img_xx = Mat::zeros(img_gray.size(), CV_64FC1);
-    Mat img_yy = Mat::zeros(img_gray.size(), CV_64FC1);
-    Mat img_xy = Mat::zeros(img_gray.size(), CV_64FC1);
-    Mat R = Mat::zeros(img_gray.size(), CV_64FC1);
-    Mat img_det = Mat::zeros(img_gray.size(), CV_64FC1);
-    Mat img_trace = Mat::zeros(img_gray.size(), CV_64FC1);
+	Mat img_gray, result, filter_R;
+	cvtColor(img, img_gray, COLOR_BGR2GRAY);  //å°†å½©è‰²å›¾åƒè½¬åŒ–æˆç°åº¦å›¾åƒ
+	Mat img_x = Mat::zeros(img_gray.size(), CV_64FC1);
+	Mat img_y = Mat::zeros(img_gray.size(), CV_64FC1);
+	Mat img_xx = Mat::zeros(img_gray.size(), CV_64FC1);
+	Mat img_yy = Mat::zeros(img_gray.size(), CV_64FC1);
+	Mat img_xy = Mat::zeros(img_gray.size(), CV_64FC1);
+	Mat R = Mat::zeros(img_gray.size(), CV_64FC1);
+	Mat img_det = Mat::zeros(img_gray.size(), CV_64FC1);
+	Mat img_trace = Mat::zeros(img_gray.size(), CV_64FC1);
+	Mat maxLambda = Mat::zeros(img_gray.size(), CV_64FC1);
+	Mat minLambda = Mat::zeros(img_gray.size(), CV_64FC1);
 
-    Sobel(img_gray, img_x, CV_64FC1, 1, 0, 3);  //x·½ÏòÌİ¶È
-    Sobel(img_gray, img_y, CV_64FC1, 0, 1, 3);  //y·½ÏòÌİ¶È
+	Sobel(img_gray, img_x, CV_64FC1, 1, 0, 3);  //xæ–¹å‘æ¢¯åº¦
+	Sobel(img_gray, img_y, CV_64FC1, 0, 1, 3);  //yæ–¹å‘æ¢¯åº¦
 
-    img_xx = computeImage(img_x, img_y, 3, 1);
-    img_yy = computeImage(img_x, img_y, 3, 2);
-    img_xy = computeImage(img_x, img_y, 3, 4);
-    R = computeImage(img_x, img_y, 3, 3);
-    filter_R = FilterR(R, img, 10);
-    
-    imshow("R", filter_R);
-    imwrite("./R.jpg", filter_R);
-    imshow("processed image", img);
-    imwrite("./processed image.jpg", img);
-    waitKey(0);
+	computeImage(img_x, img_y, 3, img_xx, img_yy, img_xy, maxLambda, minLambda, R);
+	filter_R = FilterR(R, img, 10);
+
+	imshow("Max Eigenvalue", maxLambda);
+	imwrite("./Max Eigenvalue.jpg", maxLambda);
+	imshow("Min Eigenvalue", minLambda);
+	imwrite("./Min Eigenvalue.jpg", minLambda);
+	imshow("R", filter_R);
+	imwrite("./R.jpg", filter_R);
+	imshow("Processed Image", img);
+	imwrite("./Processed Image.jpg", img);
+	waitKey(0);
 }
 
 
-Mat computeImage(Mat& ix, Mat& iy, int wsize, int para) {
+void computeImage(Mat& ix, Mat& iy, int wsize, Mat& i_xx, Mat& i_yy, Mat& i_xy, Mat& i_max, Mat& i_min, Mat& r) 
+{
+	for (int i = wsize / 2; i < (ix.rows - wsize / 2); i++)
+		for (int j = wsize / 2; j < (ix.cols - wsize / 2); j++) 
+		{
+			//compute A B C, A = Ix * Ix, B = Iy * Iy, C = Ix * Iy
+			double A = 0;
+			double B = 0;
+			double C = 0;
+			for (int ii = i - wsize / 2; ii <= (i + wsize / 2); ii++)
+				for (int jj = j - wsize / 2; jj <= (j + wsize / 2); jj++) 
+				{
+					double xx = ix.at<double>(ii, jj);
+					double yy = iy.at<double>(ii, jj);
+					A += xx * xx;
+					B += yy * yy;
+					C += xx * yy;
+				}
+			double p = A + B;
+			double q = A * B - C * C;
+			
+			i_xx.at<double>(i, j) = A;
+			i_yy.at<double>(i, j) = B;
+			i_xy.at<double>(i, j) = C;
+			double rr = q - 0.06 * p * p;
+			double maxVal, minVal;
+			GetLambda(A, B, C, maxVal, minVal);
+			i_max.at<double>(i, j) = maxVal;
+			i_min.at<double>(i, j) = minVal;
+			if (rr > THRESHOLD) 
+			{
+				r.at<double>(i, j) = rr;
+			}
+		}
+}
 
-    Mat I_xx, I_yy, I_xy, r;
-    I_xx = Mat::zeros(ix.size(), CV_64FC1);
-    I_yy = Mat::zeros(ix.size(), CV_64FC1);
-    r = Mat::zeros(ix.size(), CV_64FC1);
-    I_xy = Mat::zeros(ix.size(), CV_64FC1);
 
-
-    for (int i = wsize / 2; i < (ix.rows - wsize / 2); i++)
-        for (int j = wsize / 2; j < (ix.cols - wsize / 2); j++) {
-            //compute A B C, A = Ix * Ix, B = Iy * Iy, C = Ix * Iy
-            double A = 0;
-            double B = 0;
-            double C = 0;
-            for (int ii = i - wsize / 2; ii <= (i + wsize / 2); ii++)
-                for (int jj = j - wsize / 2; jj <= (j + wsize / 2); jj++) {
-                    double xx = ix.at<double>(ii, jj);
-                    double yy = iy.at<double>(ii, jj);
-                    A += xx * xx;
-                    B += yy * yy;
-                    C += xx * yy;
-                }
-            double p = A + B;
-            double q = A * B - C * C;
-            //double delta = p * p - 4 * q;//A2+B2-AB+4C2
-
-            I_xx.at<double>(i, j) = A;
-            I_yy.at<double>(i, j) = B;
-            I_xy.at<double>(i, j) = C;
-            double rr = q - 0.06 * p * p;
-
-            if (rr > THRESHOLD) {
-                r.at<double>(i, j) = rr;
-            }
-
-        }
-    switch (para) {
-    case 1: return I_xx; break;
-    case 2: return I_yy; break;
-    case 3: return r; break;
-    case 4:return I_xy; break;
-    }
+void GetLambda(double ixx, double iyy, double ixy, double& maxVal, double& minVal)
+{
+	Matrix2d M;
+	M << ixx, ixy, ixy, iyy;
+	EigenSolver<Matrix2d> es(M);
+	maxVal = es.eigenvalues()[0].real();
+	minVal = es.eigenvalues()[1].real();
+	if (maxVal < minVal) swap(maxVal, minVal);
 }
 
 
 Mat FilterR(Mat& R, Mat& img, int wsize) {
-    Mat result;
-    result = Mat::zeros(R.size(), CV_64F);
+	Mat result;
+	result = Mat::zeros(R.size(), CV_64F);
 
-    //find local maxima of R
-    for (int i = wsize / 2; i < (R.rows - wsize / 2); i++)
-        for (int j = wsize / 2; j < (R.cols - wsize / 2); j++) {
-            double origin = R.at<double>(i, j);
-            bool found = false;
-            for (int ii = i - wsize / 2; ii <= (i + wsize / 2) && found == false; ii++)
-                for (int jj = j - wsize / 2; jj <= (j + wsize / 2); jj++)
-                    if (origin < R.at<double>(ii, jj)) {
-                        origin = 0;
-                        found = true;
-                        break;
-                    }
-            if (origin == 0)
-                result.at<double>(i, j) = 0;
-            else
-            {
-                result.at<double>(i, j) = 255;
-                circle(img, Point(j, i), 5, Scalar(0, 0, 255), 2, 8, 0);
-            }  
-        }
+	//find local maxima of R
+	for (int i = wsize / 2; i < (R.rows - wsize / 2); i++)
+		for (int j = wsize / 2; j < (R.cols - wsize / 2); j++) {
+			double origin = R.at<double>(i, j);
+			bool found = false;
+			for (int ii = i - wsize / 2; ii <= (i + wsize / 2) && found == false; ii++)
+				for (int jj = j - wsize / 2; jj <= (j + wsize / 2); jj++)
+					if (origin < R.at<double>(ii, jj)) {
+						origin = 0;
+						found = true;
+						break;
+					}
+			if (origin == 0)
+				result.at<double>(i, j) = 0;
+			else
+			{
+				result.at<double>(i, j) = 255;
+				circle(img, Point(j, i), 5, Scalar(0, 0, 255), 2, 8, 0);
+			}
+		}
 
-    return result;
+	return result;
 }
 
 
 int VideoPlay()
 {
-    Mat frame;
-    cout << "Opening camera..." << endl;
-    VideoCapture capture(0); // open the first camera
-    if (!capture.isOpened())
-    {
-        cerr << "ERROR: Can't initialize camera capture" << endl;
-        return 1;
-    }
+	Mat frame;
+	cout << "Opening camera..." << endl;
+	VideoCapture capture(0); // open the first camera
+	if (!capture.isOpened())
+	{
+		cerr << "ERROR: Can't initialize camera capture" << endl;
+		return 1;
+	}
 
-    size_t nFrames = 0;
-    bool enableProcessing = false;
-    for (;;)
-    {
-        capture >> frame; // read the next frame from camera
-        if (frame.empty())
-        {
-            cerr << "ERROR: Can't grab camera frame." << endl;
-            break;
-        }
-        nFrames++;
-        if (!enableProcessing)
-        {
-            imshow("Frame", frame);
-        }
-        else
-        {  // ´¦Àíµ±Ç°Ö¡
-            imshow("image", frame);
-            HarrisCorner(frame);
-            break;
-        }
-        int key = waitKey(1);
-        if (key == 27/*ESC*/)
-            break;
-        if (key == 32/*SPACE*/)
-        {
-            enableProcessing = !enableProcessing;
-            cout << "Enable frame processing ('space' key): " << enableProcessing << endl;
-        }
-    }
-    return 0;
+	size_t nFrames = 0;
+	bool enableProcessing = false;
+	for (;;)
+	{
+		capture >> frame; // read the next frame from camera
+		if (frame.empty())
+		{
+			cerr << "ERROR: Can't grab camera frame." << endl;
+			break;
+		}
+		nFrames++;
+		if (!enableProcessing)
+		{
+			imshow("Camera", frame);
+		}
+		else
+		{  // å¤„ç†å½“å‰å¸§
+			imwrite("./Image.jpg", frame);
+			HarrisCorner(frame);
+			break;
+		}
+		int key = waitKey(1);
+		if (key == 27/*ESC*/)
+			break;
+		if (key == 32/*SPACE*/)
+		{
+			enableProcessing = !enableProcessing;
+			cout << "Enable frame processing ('space' key): " << enableProcessing << endl;
+		}
+	}
+	return 0;
 }
+
 
 
 
